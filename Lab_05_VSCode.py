@@ -1,150 +1,177 @@
-# lab05.py
-# --------------------------------------------
-# 23CSE301 - Lab 05 (Regression & Clustering)
-# --------------------------------------------
-
-import pandas as pd
+# 23CSE301 — Lab 05
+from typing import List, Dict, Tuple
 import numpy as np
+import pandas as pd
+
+# Modeling / preprocessing / metrics
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+from sklearn.metrics import (silhouette_score, calinski_harabasz_score, davies_bouldin_score)
+
+# Plotting (used in A7)
 import matplotlib.pyplot as plt
+plt.rcParams["figure.figsize"] = (6, 4)
 
-# ------------------- A1: Linear Regression (Single Feature) -------------------
-def linear_regression_one_feature(df, feature_col, target_col):
-    """
-    Performs linear regression using a single feature.
-    Returns: trained model, training data & predictions, testing data & predictions.
-    """
-    X = df[[feature_col]]
-    y = df[target_col]
+# Common utilities
+def load_crop_data(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)  # Reading CSV file from absolute path
+    df = df.dropna().reset_index(drop=True)
+    return df
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-
-    y_train_pred = model.predict(X_train)
-    y_test_pred = model.predict(X_test)
-
-    return model, (X_train, y_train, y_train_pred), (X_test, y_test, y_test_pred)
-
-# ------------------- A2: Evaluate Regression Model -------------------
-def evaluate_regression(y_true, y_pred):
-    """Calculates regression metrics: MSE, RMSE, MAPE, R2."""
+#Return MSE, RMSE, MAPE (%), R2 for given true/predicted arrays
+def regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     mse = mean_squared_error(y_true, y_pred)
-    rmse = np.sqrt(mse)
-    mape = mean_absolute_percentage_error(y_true, y_pred)
+    rmse = float(np.sqrt(mse))
+    eps = 1e-8  # protects against divide-by-zero in MAPE
+    mape = float(np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + eps))) * 100.0)
     r2 = r2_score(y_true, y_pred)
-    return {"MSE": mse, "RMSE": rmse, "MAPE": mape, "R2": r2}
+    return {"MSE": mse, "RMSE": rmse, "MAPE_%": mape, "R2": r2}
 
-# ------------------- A3: Linear Regression (Multiple Features) -------------------
-def linear_regression_multiple_features(df, target_col, drop_cols=None):
-    """
-    Performs multiple linear regression using all features except target_col and drop_cols.
-    """
-    if drop_cols is None:
-        drop_cols = []
+def a1_train_lr_one_attribute(
+    df: pd.DataFrame,
+    feature_name: str,
+    target_name: str,
+    test_size: float = 0.2,
+    random_state: int = 42
+) -> Tuple[LinearRegression, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    X = df[[feature_name]].values  # shape (n, 1)
+    y = df[target_name].values     # numeric target
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+    model = LinearRegression().fit(X_train, y_train)
+    return model, X_train, X_test, y_train, y_test
 
-    X = df.drop(columns=[target_col] + drop_cols)
-    y = df[target_col]
+def a2_evaluate_lr(
+    model: LinearRegression,
+    X_train: np.ndarray, y_train: np.ndarray,
+    X_test: np.ndarray,  y_test: np.ndarray
+) -> Dict[str, Dict[str, float]]:
+    train_pred = model.predict(X_train)
+    test_pred  = model.predict(X_test)
+    return {
+        "train": regression_metrics(y_train, train_pred),
+        "test":  regression_metrics(y_test,  test_pred)
+    }
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+def a3_train_lr_multi_attribute(
+    df: pd.DataFrame,
+    feature_names: List[str],
+    target_name: str,
+    test_size: float = 0.2,
+    random_state: int = 42,
+    scale_features: bool = False
+) -> Tuple[LinearRegression, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    X = df[feature_names].values
+    y = df[target_name].values
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+    if scale_features:
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test  = scaler.transform(X_test)
+    model = LinearRegression().fit(X_train, y_train)
+    return model, X_train, X_test, y_train, y_test
 
-    model = LinearRegression()
-    model.fit(X_train, y_train)
+def a4_prepare_features_for_clustering(df: pd.DataFrame) -> np.ndarray:
+    feature_cols = [c for c in df.columns if c != "label"]
+    X = df[feature_cols].values.astype(np.float64)
+    scaler = StandardScaler()
+    X_std = scaler.fit_transform(X)
+    return X_std
 
-    y_train_pred = model.predict(X_train)
-    y_test_pred = model.predict(X_test)
+def a5_fit_kmeans_and_scores(
+    X_std: np.ndarray, k: int, random_state: int = 42
+) -> Tuple[KMeans, Dict[str, float]]:
+    km = KMeans(n_clusters=k, random_state=random_state, n_init="auto").fit(X_std)
+    labels = km.labels_
+    scores = {
+        "inertia": km.inertia_,
+        "silhouette": silhouette_score(X_std, labels),
+        "calinski_harabasz": calinski_harabasz_score(X_std, labels),
+        "davies_bouldin": davies_bouldin_score(X_std, labels)
+    }
+    return km, scores
 
-    return model, (X_train, y_train, y_train_pred), (X_test, y_test, y_test_pred)
-
-# ------------------- A4: KMeans Clustering -------------------
-def kmeans_clustering(df, n_clusters):
-    """
-    Performs KMeans clustering on the dataset (target column should be removed beforehand).
-    Returns: model, cluster labels, cluster centers.
-    """
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
-    kmeans.fit(df)
-    return kmeans, kmeans.labels_, kmeans.cluster_centers_
-
-# ------------------- A5: Evaluate Clustering -------------------
-def clustering_scores(df, labels):
-    """Computes Silhouette, Calinski-Harabasz, Davies-Bouldin scores for clustering."""
-    sil = silhouette_score(df, labels)
-    ch = calinski_harabasz_score(df, labels)
-    db = davies_bouldin_score(df, labels)
-    return {"Silhouette": sil, "Calinski-Harabasz": ch, "Davies-Bouldin": db}
-
-# ------------------- A6: Clustering for Multiple k -------------------
-def clustering_for_multiple_k(df, k_values):
-    """Performs clustering for multiple k values and returns scores."""
-    results = []
+def a6_kmeans_grid(
+    X_std: np.ndarray, k_values: List[int], random_state: int = 42
+) -> pd.DataFrame:
+    rows = []
     for k in k_values:
-        kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto").fit(df)
-        scores = clustering_scores(df, kmeans.labels_)
-        results.append({"k": k, **scores})
-    return results
+        _, s = a5_fit_kmeans_and_scores(X_std, k, random_state=random_state)
+        row = {"k": k}
+        row.update(s)
+        rows.append(row)
+    return pd.DataFrame(rows)
 
-# ------------------- A7: Elbow Method -------------------
-def elbow_plot(df, k_range):
-    """Plots the elbow curve (Distortion/Inertia vs. Number of clusters)."""
-    distortions = []
-    for k in k_range:
-        km = KMeans(n_clusters=k, random_state=42, n_init="auto").fit(df)
-        distortions.append(km.inertia_)
-    plt.plot(k_range, distortions, marker='o')
-    plt.xlabel('Number of clusters (k)')
-    plt.ylabel('Distortion (Inertia)')
-    plt.title('Elbow Method for Optimal k')
+def a7_elbow_plot(scores_df: pd.DataFrame, title: str = "Elbow Plot (Inertia vs k)") -> None:
+    plt.figure()
+    plt.plot(scores_df["k"], scores_df["inertia"], marker="o")
+    plt.xlabel("Number of clusters (k)")
+    plt.ylabel("Inertia (within-cluster SSE)")
+    plt.title(title)
+    plt.grid(True)
     plt.show()
 
-# ------------------- MAIN PROGRAM -------------------
+def plot_cluster_quality(scores_df: pd.DataFrame) -> None:
+    fig, ax = plt.subplots(1, 3, figsize=(15, 4))
+    ax[0].plot(scores_df["k"], scores_df["silhouette"], marker="o")
+    ax[0].set_title("Silhouette vs k"); ax[0].set_xlabel("k"); ax[0].set_ylabel("Silhouette"); ax[0].grid(True)
+    ax[1].plot(scores_df["k"], scores_df["calinski_harabasz"], marker="o")
+    ax[1].set_title("Calinski-Harabasz vs k"); ax[1].set_xlabel("k"); ax[1].set_ylabel("CH Score"); ax[1].grid(True)
+    ax[2].plot(scores_df["k"], scores_df["davies_bouldin"], marker="o")
+    ax[2].set_title("Davies-Bouldin vs k"); ax[2].set_xlabel("k"); ax[2].set_ylabel("DB Index (lower is better)"); ax[2].grid(True)
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
-    # Load dataset 
-    df = pd.read_csv("C:/Users/bramj/OneDrive/Desktop/Crop_recommendation.csv")
 
-    # ========= A1 & A2: One Feature Regression =========
-    model_one, train_data_one, test_data_one = linear_regression_one_feature(df, 'N', 'rainfall')
-    _, y_train, y_train_pred = train_data_one
-    _, y_test, y_test_pred = test_data_one
+    data_path = r"C:\Users\bramj\OneDrive\Desktop\Crop_recommendation.csv"  # <-- Absolute path
+    df = load_crop_data(data_path)
 
-    metrics_train_one = evaluate_regression(y_train, y_train_pred)
-    metrics_test_one = evaluate_regression(y_test, y_test_pred)
+    # A1 & A2: LR with one attribute
+    one_feature = "temperature"
+    target_col  = "rainfall"
+    model_1, Xtr1, Xte1, ytr1, yte1 = a1_train_lr_one_attribute(df, one_feature, target_col)
+    metrics_1 = a2_evaluate_lr(model_1, Xtr1, ytr1, Xte1, yte1)
+    print("==== A1–A2: Linear Regression with ONE feature ====")
+    print(f"Feature: [{one_feature}]  ->  Target: {target_col}")
+    print("Train metrics:", metrics_1["train"])
+    print("Test  metrics:",  metrics_1["test"])
+    print()
 
-    print("\n=== A1 & A2: Linear Regression (1 Feature: N) on Rainfall ===")
-    print("Train Metrics:", metrics_train_one)
-    print("Test Metrics:", metrics_test_one)
+    #A3: LR with multiple attributes
+    multi_features = ["N", "P", "K", "temperature", "humidity", "ph"]
+    model_3, Xtr3, Xte3, ytr3, yte3 = a3_train_lr_multi_attribute(df, multi_features, target_col)
+    metrics_3 = a2_evaluate_lr(model_3, Xtr3, ytr3, Xte3, yte3)
+    print("==== A3: Linear Regression with MULTIPLE features ====")
+    print(f"Features: {multi_features}  ->  Target: {target_col}")
+    print("Train metrics:", metrics_3["train"])
+    print("Test  metrics:",  metrics_3["test"])
+    print()
 
-    # ========= A3: Multiple Features Regression =========
-    model_multi, train_data_multi, test_data_multi = linear_regression_multiple_features(df, 'rainfall', drop_cols=['label'])
-    _, y_train_m, y_train_pred_m = train_data_multi
-    _, y_test_m, y_test_pred_m = test_data_multi
+    # A4 & A5: KMeans with k=2 + Scores
+    X_std = a4_prepare_features_for_clustering(df)
+    k_example = 2
+    km2, scores2 = a5_fit_kmeans_and_scores(X_std, k_example)
+    print("==== A4–A5: KMeans (k=2) + Silhouette/CH/DB ====")
+    print("Cluster centers (standardized space):")
+    print(km2.cluster_centers_)
+    print("Scores (k=2):", scores2)
+    print()
 
-    metrics_train_multi = evaluate_regression(y_train_m, y_train_pred_m)
-    metrics_test_multi = evaluate_regression(y_test_m, y_test_pred_m)
+    # A6: Metrics for a range of k
+    k_values = list(range(2, 11))
+    scores_df = a6_kmeans_grid(X_std, k_values)
+    print("==== A6: KMeans metrics across k ====")
+    print(scores_df.to_string(index=False))
+    print("\nNotes: Higher Silhouette & CH are better; lower DB is better.\n")
 
-    print("\n=== A3: Linear Regression (Multiple Features) on Rainfall ===")
-    print("Train Metrics:", metrics_train_multi)
-    print("Test Metrics:", metrics_test_multi)
-
-    # ========= A4 & A5: KMeans Clustering (k=2) =========
-    X_cluster = df.drop(columns=['label'])
-    kmeans_model, labels, centers = kmeans_clustering(X_cluster, 2)
-    cluster_scores_k2 = clustering_scores(X_cluster, labels)
-
-    print("\n=== A4 & A5: KMeans Clustering (k=2) ===")
-    print("Cluster Centers:\n", centers)
-    print("Scores:", cluster_scores_k2)
-
-    # ========= A6: Clustering Scores for Multiple k =========
-    print("\n=== A6: Clustering Scores for multiple k ===")
-    for res in clustering_for_multiple_k(X_cluster, range(2, 10)):
-        print(res)
-
-    # ========= A7: Elbow Plot =========
-    print("\n=== A7: Elbow Plot ===")
-    elbow_plot(X_cluster, range(2, 20))
+    # A7: Elbow Plot
+    print("==== A7: Elbow (Inertia vs k) ====")
+    a7_elbow_plot(scores_df, title="Elbow Plot: Crop Data")
+    plot_cluster_quality(scores_df)
