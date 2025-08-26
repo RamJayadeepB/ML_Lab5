@@ -130,7 +130,7 @@ def plot_cluster_quality(scores_df: pd.DataFrame) -> None:
 
 if __name__ == "__main__":
 
-    data_path = r"C:\Users\bramj\OneDrive\Desktop\Crop_recommendation.csv"  # <-- Absolute path
+    data_path = r"C:\Users\DELL\Downloads\Crop_recommendation.csv"  # <-- Absolute path
     df = load_crop_data(data_path)
 
     # A1 & A2: LR with one attribute
